@@ -1,0 +1,8 @@
+{
+  "name": "publisher",
+  "private": true,
+  "scripts": {
+    "dev": "cd web && npx wrangler pages dev -- pnpm dev",
+    "build": "cd web && pnpm build"
+  }
+}
