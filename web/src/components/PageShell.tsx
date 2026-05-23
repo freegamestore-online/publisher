@@ -2,6 +2,7 @@ import { Nav } from "./Nav";
 
 const centerStyle = { minHeight: "calc(100dvh - 60px)" };
 
+/** Full-page loading spinner with Nav. */
 export function LoadingShell() {
   return (
     <>
@@ -13,6 +14,7 @@ export function LoadingShell() {
   );
 }
 
+/** Full-page sign-in prompt with Nav. */
 export function SignInShell({ onSignIn, message }: { onSignIn: () => void; message: string }) {
   return (
     <>
@@ -40,6 +42,7 @@ export function SignInShell({ onSignIn, message }: { onSignIn: () => void; messa
   );
 }
 
+/** Full-page error message with Nav. */
 export function ErrorShell({ message }: { message: string }) {
   return (
     <>

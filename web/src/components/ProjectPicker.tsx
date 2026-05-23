@@ -87,7 +87,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-label="Project picker" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
-      <div className="rounded-2xl shadow-xl w-full max-w-md mx-4" style={{ background: "var(--panel)", border: "1px solid var(--line)", maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+      <div role="document" className="rounded-2xl shadow-xl w-full max-w-md mx-4" style={{ background: "var(--panel)", border: "1px solid var(--line)", maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 shrink-0" style={{ borderBottom: "1px solid var(--line)" }}>

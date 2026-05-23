@@ -48,6 +48,7 @@ interface CreateGameFormProps {
   onCreated: () => Promise<void>;
 }
 
+/** Self-contained game creation form with validation, provisioning, and result display. */
 export function CreateGameForm({ onCreated }: CreateGameFormProps) {
   const [gameId, setGameId] = useState("");
   const [gameName, setGameName] = useState("");

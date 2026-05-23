@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Nav } from "../components/Nav";
 import { CreateGameForm } from "../components/CreateGameForm";
 import { LoadingShell, SignInShell, ErrorShell } from "../components/PageShell";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth, type GameRepo } from "../hooks/useAuth";
 
 export function Dashboard() {
   const { user, creator, loading, error, refetch, fetchCreator, signIn } = useAuth();
@@ -75,17 +75,7 @@ export function Dashboard() {
   );
 }
 
-interface GameInfo {
-  id: string;
-  name: string;
-  previewUrl: string;
-  liveUrl: string;
-  repoUrl: string;
-  createdAt: string;
-  published: boolean;
-}
-
-function GameList({ games }: { games: GameInfo[] }) {
+function GameList({ games }: { games: GameRepo[] }) {
   return (
     <section className="mb-8">
       <h3 className="text-lg font-semibold mb-3">Your Games</h3>

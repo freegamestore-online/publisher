@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-interface GameRepo {
+/** A game published to FreeGameStore by this creator. */
+export interface GameRepo {
   id: string;
   name: string;
   previewUrl: string;
@@ -45,10 +46,12 @@ export const AuthContext = createContext<AuthContextValue>({
   signOut: async () => {},
 });
 
+/** Access the current auth state (user, creator, loading, signIn/signOut). */
 export function useAuth() {
   return useContext(AuthContext);
 }
 
+/** Auth provider hook — manages session state, GitHub OAuth, and creator data. */
 export function useAuthProvider(): AuthContextValue {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [creator, setCreator] = useState<CreatorRecord | null>(null);

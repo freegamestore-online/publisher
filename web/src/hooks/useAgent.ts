@@ -5,6 +5,7 @@ export type { Project };
 
 const AGENT_URL = "https://agent.freegamestore.online";
 
+/** A single message in the agent conversation (user, assistant, tool, or system). */
 export interface AgentMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string;
@@ -13,6 +14,7 @@ export interface AgentMessage {
 export type { DeployState } from "../types";
 import type { DeployState } from "../types";
 
+/** Configuration for the AI provider (provider, model, API key, temperature). */
 export interface AIConfig {
   provider: string;
   model: string;
@@ -21,6 +23,7 @@ export interface AIConfig {
   maxTokens: number;
 }
 
+/** Manages the VibeCode agent session — chat messages, streaming, deploy state, and project switching. */
 export function useAgent() {
   const projectsMgr = useProjects();
   const [messages, setMessages] = useState<AgentMessage[]>([{ role: "system" as const, content: "Describe the game you want to build." }]);
