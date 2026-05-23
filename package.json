@@ -1,8 +1,16 @@
 {
   "name": "publisher",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/freegamestore-online/publisher"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "cd web && npx wrangler pages dev -- pnpm dev",
-    "build": "cd web && pnpm build"
+    "build": "cd web && pnpm build",
+    "test": "cd web && pnpm test"
   }
 }
