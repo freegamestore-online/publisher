@@ -41,8 +41,8 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
       .then((repos) => {
         if (!Array.isArray(repos)) return;
         const apps = repos
-          .filter((r: any) => !EXCLUDED.has(r.name) && !r.name.startsWith("template-"))
-          .map((r: any) => ({
+          .filter((r: { name: string }) => !EXCLUDED.has(r.name) && !r.name.startsWith("template-"))
+          .map((r: { name: string; description?: string; pushed_at?: string }) => ({
             id: r.name,
             name: r.name,
             description: r.description || "",
@@ -86,7 +86,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-label="Project picker" style={{ background: "rgba(0,0,0,0.5)" }} onClick={onClose} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
       <div className="rounded-2xl shadow-xl w-full max-w-md mx-4" style={{ background: "var(--panel)", border: "1px solid var(--line)", maxHeight: "80vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
@@ -112,7 +112,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search games..."
-              autoFocus
+              aria-label="Search games"
               className="w-full p-2 rounded-lg border text-sm"
               style={{ background: "var(--paper)", borderColor: "var(--line)", color: "var(--ink)" }}
             />
@@ -167,7 +167,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Game name..."
-                autoFocus
+                aria-label="New game name"
                 className="w-full p-2.5 rounded-lg border mb-3 text-sm"
                 style={{ background: "var(--paper)", borderColor: "var(--line)", color: "var(--ink)" }}
                 onKeyDown={(e) => { if (e.key === "Enter") handleCreateNew(); }}

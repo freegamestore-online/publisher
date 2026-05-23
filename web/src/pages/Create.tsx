@@ -4,7 +4,7 @@ import { ChatMessage } from "../components/ChatMessage";
 import { DeployLog } from "../components/DeployLog";
 import { ProjectPicker } from "../components/ProjectPicker";
 import { useAuth } from "../hooks/useAuth";
-import { useAgent, type AIConfig } from "../hooks/useAgent";
+import { useAgent, type AIConfig, type Project } from "../hooks/useAgent";
 import { getKey } from "../lib/ai-keys";
 
 const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
@@ -82,7 +82,7 @@ export function Create() {
   };
 
   // Preview URL comes from deploy status (dynamic CF Pages project name)
-  const currentProject = agent.projects.find((p: any) => p.id === agent.currentProjectId);
+  const currentProject = agent.projects.find((p) => p.id === agent.currentProjectId);
   const previewUrl = currentProject?.appUrl
     || (agent.deployState?.appUrl?.includes("pages.dev") ? agent.deployState.appUrl : null);
   const showPreview = previewUrl && (agent.deployState?.phase === "live" || agent.deployState?.phase === "building" || currentProject?.deployed);
@@ -131,6 +131,7 @@ export function Create() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder="Build me a space invaders game..."
+              aria-label="Describe your game"
               rows={1}
               className="flex-1 resize-none"
               style={{ border: "1px solid var(--border)", borderRadius: "0.5rem", padding: "0.4rem 0.6rem", background: "var(--bg)", color: "var(--ink)", fontSize: "0.86rem", minHeight: 44, maxHeight: 100, fontFamily: "Manrope, system-ui, sans-serif" }}
@@ -173,7 +174,18 @@ export function Create() {
 
 /* -- Sub-components -- */
 
-function Toolbar({ agent, currentProject, provider, setProvider, model, setModel, apiKey, setApiKey, temperature, setTemperature, settingsOpen, setSettingsOpen, setPickerOpen }: any) {
+interface ToolbarProps {
+  agent: ReturnType<typeof useAgent>;
+  currentProject: Project | undefined;
+  provider: string; setProvider: (v: string) => void;
+  model: string; setModel: (v: string) => void;
+  apiKey: string; setApiKey: (v: string) => void;
+  temperature: number; setTemperature: (v: number) => void;
+  settingsOpen: boolean; setSettingsOpen: (v: boolean) => void;
+  setPickerOpen: (v: boolean) => void;
+}
+
+function Toolbar({ agent, currentProject, provider, setProvider, model, setModel, apiKey, setApiKey, temperature, setTemperature, settingsOpen, setSettingsOpen, setPickerOpen }: ToolbarProps) {
   const sel: React.CSSProperties = { padding: "0.2rem 0.4rem", border: "1px solid var(--border)", borderRadius: "0.3rem", background: "var(--bg)", color: "var(--ink)", fontFamily: "inherit", fontSize: "0.78rem" };
   const btn: React.CSSProperties = { background: "none", border: "1px solid var(--border)", borderRadius: "0.3rem", padding: "0.15rem 0.4rem", cursor: "pointer", color: "var(--ink)", fontSize: "0.78rem", minHeight: 28 };
 
@@ -191,17 +203,17 @@ function Toolbar({ agent, currentProject, provider, setProvider, model, setModel
       </div>
       {settingsOpen && (
         <div className="flex flex-wrap items-center gap-2 shrink-0" style={{ padding: "0.35rem 0.75rem", borderBottom: "1px solid var(--border)", background: "var(--surface)", fontSize: "0.78rem" }}>
-          <select value={provider} onChange={(e) => { setProvider(e.target.value); setModel(MODEL_OPTIONS[e.target.value]?.[0]?.value || ""); }} style={sel}>
+          <select aria-label="AI provider" value={provider} onChange={(e) => { setProvider(e.target.value); setModel(MODEL_OPTIONS[e.target.value]?.[0]?.value || ""); }} style={sel}>
             <option value="github">GitHub Models</option><option value="openrouter">OpenRouter</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="google">Google</option>
           </select>
-          <select value={model} onChange={(e) => setModel(e.target.value)} style={sel}>
+          <select aria-label="AI model" value={model} onChange={(e) => setModel(e.target.value)} style={sel}>
             {(MODEL_OPTIONS[provider] || []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
           {getKey(provider)
             ? <span className="text-xs" style={{ color: "var(--success)" }}>Key saved</span>
-            : <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API key" style={{ ...sel, width: 180 }} />
+            : <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API key" aria-label="API key" style={{ ...sel, width: 180 }} />
           }
-          <select value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} style={sel}>
+          <select aria-label="Temperature" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} style={sel}>
             <option value={0}>Temp 0</option><option value={0.3}>Temp 0.3</option><option value={0.7}>Temp 0.7</option><option value={1}>Temp 1</option>
           </select>
         </div>
@@ -210,13 +222,13 @@ function Toolbar({ agent, currentProject, provider, setProvider, model, setModel
   );
 }
 
-function CopyLogButton({ agent, provider, model }: { agent: any; provider: string; model: string }) {
+function CopyLogButton({ agent, provider, model }: { agent: ReturnType<typeof useAgent>; provider: string; model: string }) {
   const [copied, setCopied] = useState(false);
   const btn: React.CSSProperties = { background: "none", border: "1px solid var(--border)", borderRadius: "0.3rem", padding: "0.15rem 0.4rem", cursor: "pointer", color: copied ? "var(--success)" : "var(--muted)", fontSize: "0.72rem", minHeight: 28 };
 
   async function copy() {
     const json = JSON.stringify({
-      project: agent.projects.find((p: any) => p.id === agent.currentProjectId)?.name || "unknown",
+      project: agent.projects.find((p) => p.id === agent.currentProjectId)?.name || "unknown",
       sessionId: agent.currentProjectId,
       provider, model,
       tokens: { input: agent.tokensIn, output: agent.tokensOut },

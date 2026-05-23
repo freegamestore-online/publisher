@@ -5,17 +5,13 @@ export type { Project };
 
 const AGENT_URL = "https://agent.freegamestore.online";
 
-export interface ChatMessage {
+export interface AgentMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string;
 }
 
-export interface DeployState {
-  phase: string;
-  steps?: { name: string; status: string }[];
-  appUrl?: string;
-  error?: string;
-}
+export type { DeployState } from "../types";
+import type { DeployState } from "../types";
 
 export interface AIConfig {
   provider: string;
@@ -27,7 +23,7 @@ export interface AIConfig {
 
 export function useAgent() {
   const projectsMgr = useProjects();
-  const [messages, setMessages] = useState<ChatMessage[]>([{ role: "system", content: "Describe the game you want to build." }]);
+  const [messages, setMessages] = useState<AgentMessage[]>([{ role: "system" as const, content: "Describe the game you want to build." }]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [tokensIn, setTokensIn] = useState(0);
   const [tokensOut, setTokensOut] = useState(0);
@@ -58,17 +54,17 @@ export function useAgent() {
   const loadHistory = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const res = await fetch(`${AGENT_URL}/session/${sessionId}/history`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data.messages?.length) return;
-      const restored = restoreMessages(data.messages);
+      const historyRes = await fetch(`${AGENT_URL}/session/${sessionId}/history`);
+      if (!historyRes.ok) return;
+      const historyData = await historyRes.json();
+      if (!historyData.messages?.length) return;
+      const restored = restoreMessages(historyData.messages);
       if (restored.length > 0) setMessages(restored);
-      if (data.deployStatus?.phase === "live") {
-        setDeployState(data.deployStatus);
-        if (data.appId) projectsMgr.markDeployed(sessionId, data.appId, data.deployStatus.appUrl || "");
+      if (historyData.deployStatus?.phase === "live") {
+        setDeployState(historyData.deployStatus);
+        if (historyData.appId) projectsMgr.markDeployed(sessionId, historyData.appId, historyData.deployStatus.appUrl || "");
       }
-      if (data.appName) projectsMgr.rename(sessionId, data.appName);
+      if (historyData.appName) projectsMgr.rename(sessionId, historyData.appName);
     } catch { /* ignore */ }
   }, [sessionId, projectsMgr]);
 
@@ -93,14 +89,14 @@ export function useAgent() {
     };
 
     try {
-      const res = await fetch(`${AGENT_URL}/session/${sessionId}/chat`, {
+      const chatRes = await fetch(`${AGENT_URL}/session/${sessionId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, aiConfig }),
       });
-      if (!res.ok) { updateAssistant(`Error: ${await res.text()}`); return; }
+      if (!chatRes.ok) { updateAssistant(`Error: ${await chatRes.text()}`); return; }
 
-      const reader = res.body!.getReader();
+      const reader = chatRes.body!.getReader();
       const decoder = new TextDecoder();
       let buf = "";
 
@@ -191,8 +187,15 @@ function toolLabel(tc: { name: string; input?: Record<string, unknown> }): strin
   }
 }
 
-function restoreMessages(serverMessages: any[]): ChatMessage[] {
-  const restored: ChatMessage[] = [];
+interface ServerMessage {
+  role: string;
+  content?: string;
+  toolCalls?: Array<{ name: string; input?: Record<string, unknown> }>;
+  toolResults?: Array<{ content: string }>;
+}
+
+function restoreMessages(serverMessages: ServerMessage[]): AgentMessage[] {
+  const restored: AgentMessage[] = [];
   for (const m of serverMessages) {
     if (m.role === "assistant") {
       if (m.content) restored.push({ role: "assistant", content: m.content });

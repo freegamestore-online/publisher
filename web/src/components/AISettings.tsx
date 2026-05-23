@@ -122,9 +122,9 @@ function ProviderRow({
             value={inputValue}
             onChange={(e) => onInputChange(e.target.value)}
             placeholder={p.keyPlaceholder}
+            aria-label={`API key for ${p.name}`}
             className="flex-1 p-2 rounded-lg border text-sm"
             style={{ background: "var(--paper)", borderColor: "var(--line)", color: "var(--ink)", fontFamily: "monospace" }}
-            autoFocus
             onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
           />
           <button onClick={onSave} className="px-3 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: "var(--accent)", border: "none", cursor: "pointer" }}>Save</button>

@@ -56,12 +56,9 @@ export function useAuthProvider(): AuthContextValue {
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
-    const t0 = performance.now();
     try {
-      console.log("[auth] fetching /auth/me...");
       const meRes = await fetch("/auth/me");
       const meData = (await meRes.json()) as { user: { github: string; avatarUrl: string } | null };
-      console.log(`[auth] /auth/me done in ${Math.round(performance.now() - t0)}ms`, meData.user ? `@${meData.user.github}` : "not signed in");
 
       if (!meData.user) {
         setUser(null);
@@ -83,19 +80,15 @@ export function useAuthProvider(): AuthContextValue {
 
   // Lazy fetch creator/game list — only called by pages that need it (Dashboard)
   const fetchCreator = useCallback(async () => {
-    if (creator) return; // already loaded
+    if (creator) return;
     try {
-      console.log("[auth] fetching /api/me (game list)...");
-      const t0 = performance.now();
-      const res = await fetch("/api/me");
-      console.log(`[auth] /api/me done in ${Math.round(performance.now() - t0)}ms`);
-      if (res.ok) {
-        const data = (await res.json()) as { creator: CreatorRecord };
-        setCreator(data.creator);
-        console.log(`[auth] ${data.creator.games.length} games loaded`);
+      const creatorRes = await fetch("/api/me");
+      if (creatorRes.ok) {
+        const creatorData = (await creatorRes.json()) as { creator: CreatorRecord };
+        setCreator(creatorData.creator);
       }
-    } catch (e) {
-      console.error("[auth] error fetching creator:", e);
+    } catch {
+      // silently ignore — creator data is non-critical
     }
   }, [creator]);
 
@@ -105,9 +98,9 @@ export function useAuthProvider(): AuthContextValue {
 
   const signIn = useCallback(async () => {
     const redirect = window.location.pathname + window.location.search;
-    const res = await fetch(`/auth/github/url?redirect=${encodeURIComponent(redirect)}`);
-    const data = (await res.json()) as { url: string };
-    window.location.href = data.url;
+    const authRes = await fetch(`/auth/github/url?redirect=${encodeURIComponent(redirect)}`);
+    const authData = (await authRes.json()) as { url: string };
+    window.location.href = authData.url;
   }, []);
 
   const signOut = useCallback(async () => {

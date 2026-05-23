@@ -1,4 +1,4 @@
-/** Deploy pipeline status log — shows progress through provisioning steps */
+import type { DeployState } from "../types";
 
 const DEPLOY_PIPELINE = [
   { key: "repo", label: "GitHub repo", phases: ["provisioning"] },
@@ -9,13 +9,6 @@ const DEPLOY_PIPELINE = [
 ];
 
 const PHASE_ORDER = ["provisioning", "pushing", "building", "live"];
-
-interface DeployState {
-  phase: string;
-  steps?: { name: string; status: string }[];
-  appUrl?: string;
-  error?: string;
-}
 
 export function DeployLog({ state }: { state: DeployState }) {
   const phaseIdx = PHASE_ORDER.indexOf(state.phase);
