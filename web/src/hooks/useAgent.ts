@@ -208,7 +208,7 @@ function restoreMessages(serverMessages: ServerMessage[]): AgentMessage[] {
         if (tr.content?.length > 20) restored.push({ role: "tool", content: tr.content.slice(0, 400) });
       }
     } else if (m.role === "user") {
-      restored.push({ role: "user", content: m.content });
+      restored.push({ role: "user", content: m.content ?? "" });
     }
   }
   return restored;
