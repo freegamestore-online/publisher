@@ -52,7 +52,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     },
   });
   const ghUser = (await userRes.json()) as {
-    login: string; name: string | null; avatar_url: string; email: string | null;
+    id: number; login: string; name: string | null; avatar_url: string; email: string | null;
   };
 
   // If email not public, fetch from emails endpoint
@@ -73,6 +73,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   const token = generateToken();
   const session = {
     github: ghUser.login,
+    githubId: ghUser.id,
+    sub: `github:${ghUser.id}`,
     name: ghUser.name || ghUser.login,
     avatarUrl: ghUser.avatar_url,
     email,

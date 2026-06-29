@@ -57,6 +57,23 @@ export function Profile() {
           </h3>
           <DetailRow label="Provider" value="GitHub" />
           <DetailRow label="Username" value={`@${user.github}`} />
+          {user.name && <DetailRow label="Name" value={user.name} />}
+          <DetailRow
+            label="User ID"
+            value={user.sub ?? "unknown"}
+            mono
+            copyable={!!user.sub}
+          />
+          {user.githubId != null && (
+            <DetailRow label="GitHub ID" value={String(user.githubId)} mono copyable />
+          )}
+          {user.email && <DetailRow label="Email" value={user.email} />}
+          {user.createdAt && (
+            <DetailRow
+              label="Member since"
+              value={new Date(user.createdAt).toLocaleDateString()}
+            />
+          )}
           <DetailRow
             label="Published games"
             value={String(gamesCount)}
@@ -138,21 +155,59 @@ function DetailRow({
   label,
   value,
   valueStyle,
+  mono,
+  copyable,
 }: {
   label: string;
   value: string;
   valueStyle?: React.CSSProperties;
+  mono?: boolean;
+  copyable?: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  }
+
   return (
     <div
-      className="flex justify-between items-center py-2.5 border-b text-sm"
+      className="flex justify-between items-center gap-3 py-2.5 border-b text-sm"
       style={{ borderColor: "var(--border)" }}
     >
-      <span className="font-medium" style={{ color: "var(--muted)" }}>
+      <span className="font-medium shrink-0" style={{ color: "var(--muted)" }}>
         {label}
       </span>
-      <span className="font-semibold" style={valueStyle}>
-        {value}
+      <span className="flex items-center gap-2 min-w-0">
+        <span
+          className={`font-semibold truncate${mono ? " font-mono text-xs" : ""}`}
+          style={valueStyle}
+          title={mono ? value : undefined}
+        >
+          {value}
+        </span>
+        {copyable && (
+          <button
+            onClick={handleCopy}
+            className="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium border"
+            style={{
+              background: "transparent",
+              color: copied ? "var(--accent)" : "var(--muted)",
+              borderColor: "var(--border)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+            title="Copy to clipboard"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        )}
       </span>
     </div>
   );

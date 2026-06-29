@@ -22,6 +22,19 @@ interface CreatorRecord {
 interface AuthUser {
   github: string;
   avatarUrl: string;
+  /** Numeric GitHub user id — the canonical UID. */
+  githubId: number | null;
+  /** Stable subject identifier, e.g. "github:2824906". */
+  sub: string | null;
+  name: string | null;
+  email: string | null;
+  createdAt: string | null;
+}
+
+/** GitHub avatar URLs embed the numeric user id: .../u/<id>?v=4 */
+function uidFromAvatar(avatarUrl: string): number | null {
+  const m = avatarUrl.match(/\/u\/(\d+)/);
+  return m ? Number(m[1]) : null;
 }
 
 interface AuthContextValue {
@@ -61,7 +74,17 @@ export function useAuthProvider(): AuthContextValue {
   const refetch = useCallback(async () => {
     try {
       const meRes = await fetch("/auth/me");
-      const meData = (await meRes.json()) as { user: { github: string; avatarUrl: string } | null };
+      const meData = (await meRes.json()) as {
+        user: {
+          github: string;
+          avatarUrl: string;
+          githubId?: number;
+          sub?: string;
+          name?: string | null;
+          email?: string | null;
+          createdAt?: string | null;
+        } | null;
+      };
 
       if (!meData.user) {
         setUser(null);
@@ -69,9 +92,17 @@ export function useAuthProvider(): AuthContextValue {
         return;
       }
 
+      // Older sessions predate id capture — derive the UID from the avatar URL.
+      const githubId = meData.user.githubId ?? uidFromAvatar(meData.user.avatarUrl);
+
       setUser({
         github: meData.user.github,
         avatarUrl: meData.user.avatarUrl,
+        githubId,
+        sub: meData.user.sub ?? (githubId != null ? `github:${githubId}` : null),
+        name: meData.user.name ?? null,
+        email: meData.user.email ?? null,
+        createdAt: meData.user.createdAt ?? null,
       });
     } catch (e) {
       console.error("[auth] error:", e);
