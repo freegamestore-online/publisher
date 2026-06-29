@@ -57,23 +57,72 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
   }
 }
 
-/** GitHub login of the signed-in creator, from either session source, or null. */
-export async function resolveCreator(request: Request, env: SessionEnv): Promise<string | null> {
+/** The signed-in creator's identity, normalized across both session sources. */
+export interface CreatorUser {
+  /** GitHub login / username. */
+  github: string;
+  /** Numeric GitHub user id — the canonical UID. */
+  githubId: number | null;
+  /** Stable subject identifier, e.g. "github:2824906". */
+  sub: string | null;
+  name: string | null;
+  avatarUrl: string;
+  email: string | null;
+}
+
+/**
+ * Resolve the signed-in creator from either the legacy publisher KV session
+ * (`fgs_pub_session`) or — the canonical path since auth consolidation — the
+ * `fgs_token` JWT minted by the freegamestore-auth worker. The auth worker is
+ * the single identity provider; its JWT carries `sub: "github:<id>"`, `login`,
+ * `name`, and `avatar` (scope is read:user, so there is no email claim).
+ */
+export async function resolveCreatorUser(request: Request, env: SessionEnv): Promise<CreatorUser | null> {
+  // Legacy: publisher's own KV session (pre-consolidation sign-ins).
   const pub = getCookie(request, "fgs_pub_session");
   if (pub) {
     const raw = await env.SESSIONS.get(`sessions:${pub}`);
     if (raw) {
       try {
-        return (JSON.parse(raw) as { github: string }).github;
+        const s = JSON.parse(raw) as {
+          github: string; githubId?: number; sub?: string;
+          name?: string | null; avatarUrl: string; email?: string | null;
+        };
+        return {
+          github: s.github,
+          githubId: s.githubId ?? null,
+          sub: s.sub ?? (s.githubId != null ? `github:${s.githubId}` : null),
+          name: s.name ?? null,
+          avatarUrl: s.avatarUrl,
+          email: s.email ?? null,
+        };
       } catch {
         // fall through to JWT
       }
     }
   }
+
+  // Canonical: auth-worker JWT.
   const tok = getCookie(request, "fgs_token");
   if (tok && env.JWT_SECRET) {
     const p = await verifyJWT(tok, env.JWT_SECRET);
-    if (p && typeof p.login === "string") return p.login;
+    if (p && typeof p.login === "string") {
+      const sub = typeof p.sub === "string" ? p.sub : null;
+      const parsed = sub && sub.startsWith("github:") ? Number(sub.slice("github:".length)) : NaN;
+      return {
+        github: p.login,
+        githubId: Number.isFinite(parsed) ? parsed : null,
+        sub,
+        name: typeof p.name === "string" ? p.name : null,
+        avatarUrl: typeof p.avatar === "string" ? p.avatar : "",
+        email: null,
+      };
+    }
   }
   return null;
+}
+
+/** GitHub login of the signed-in creator, from either session source, or null. */
+export async function resolveCreator(request: Request, env: SessionEnv): Promise<string | null> {
+  return (await resolveCreatorUser(request, env))?.github ?? null;
 }

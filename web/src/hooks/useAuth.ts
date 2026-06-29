@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 
+/** freegamestore-auth worker — the store-wide identity provider. */
+const AUTH_BASE = "https://auth.freegamestore.online";
+
 /** A game published to FreeGameStore by this creator. */
 export interface GameRepo {
   id: string;
@@ -130,15 +133,16 @@ export function useAuthProvider(): AuthContextValue {
     refetch();
   }, [refetch]);
 
+  // Sign-in is delegated to the freegamestore-auth worker (single identity
+  // provider). It runs GitHub OAuth on its own domain, sets the `fgs_token`
+  // cookie on `.freegamestore.online`, then redirects back here.
   const signIn = useCallback(async () => {
-    const redirect = window.location.pathname + window.location.search;
-    const authRes = await fetch(`/auth/github/url?redirect=${encodeURIComponent(redirect)}`);
-    const authData = (await authRes.json()) as { url: string };
-    window.location.href = authData.url;
+    const returnTo = window.location.href;
+    window.location.href = `${AUTH_BASE}/login?redirect=${encodeURIComponent(returnTo)}`;
   }, []);
 
   const signOut = useCallback(async () => {
-    await fetch("/auth/signout", { method: "POST" });
+    await fetch(`${AUTH_BASE}/logout`, { method: "POST", credentials: "include" }).catch(() => {});
     setUser(null);
     setCreator(null);
     window.location.href = "/";

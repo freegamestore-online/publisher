@@ -1,32 +1,10 @@
-interface Env {
-  SESSIONS: KVNamespace;
-}
+import { resolveCreatorUser, type SessionEnv } from "../api/_auth";
 
-const COOKIE_NAME = "fgs_pub_session";
-
-function parseCookie(request: Request): string | null {
-  const cookie = request.headers.get("Cookie");
-  if (!cookie) return null;
-  const match = cookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  return match?.[1] ?? null;
-}
-
-export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const token = parseCookie(context.request);
-  if (!token) {
-    return new Response(JSON.stringify({ user: null }), {
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const raw = await context.env.SESSIONS.get(`sessions:${token}`);
-  if (!raw) {
-    return new Response(JSON.stringify({ user: null }), {
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const user = JSON.parse(raw);
+// Identity for the console/profile UI. Since auth consolidation the source of
+// truth is the freegamestore-auth worker's `fgs_token` JWT; resolveCreatorUser
+// also accepts the legacy publisher KV session for backward compatibility.
+export const onRequestGet: PagesFunction<SessionEnv> = async (context) => {
+  const user = await resolveCreatorUser(context.request, context.env);
   return new Response(JSON.stringify({ user }), {
     headers: { "Content-Type": "application/json" },
   });
