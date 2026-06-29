@@ -1,3 +1,5 @@
+import { resolveCreator, corsHeaders } from "./_auth";
+
 interface Env {
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
@@ -5,7 +7,11 @@ interface Env {
   MAX_APPS_PER_USER: string;
   CREATORS: KVNamespace;
   SESSIONS: KVNamespace;
+  JWT_SECRET?: string;
 }
+
+export const onRequestOptions: PagesFunction<Env> = async (ctx) =>
+  new Response(null, { status: 204, headers: corsHeaders(ctx.request) });
 
 const CONFIG = {
   org: "freegamestore-online",
@@ -18,15 +24,6 @@ const TEMPLATES: Record<string, string> = {
   cards: "template-game-cards",
   "3d": "template-game-3d",
 };
-
-const COOKIE_NAME = "fgs_pub_session";
-
-function parseCookie(request: Request): string | null {
-  const cookie = request.headers.get("Cookie");
-  if (!cookie) return null;
-  const match = cookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  return match?.[1] ?? null;
-}
 
 function validateId(id: string): string | null {
   if (!id) return "ID is required";
@@ -43,17 +40,9 @@ function validateId(id: string): string | null {
  * Use POST /api/publish to make it live on the store.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const token = parseCookie(context.request);
-  let user: string | null = null;
-  if (token) {
-    const raw = await context.env.SESSIONS.get(`sessions:${token}`);
-    if (raw) {
-      const session = JSON.parse(raw) as { github: string };
-      user = session.github;
-    }
-  }
+  const user = await resolveCreator(context.request, context.env);
   const json = (v: unknown, status = 200) =>
-    new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
+    new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json", ...corsHeaders(context.request) } });
 
   if (!user) return json({ error: "Unauthorized" }, 401);
 
