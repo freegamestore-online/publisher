@@ -2,6 +2,15 @@
  *  Supports: **bold**, *italic*, `code`, ```blocks```, [links](url),
  *  - lists, # headings, --- dividers. No npm dependency. */
 
+/** Allow only http(s)/mailto and same-origin relative links; reject
+ *  javascript:, data:, vbscript:, etc. from untrusted assistant output. */
+function isSafeHref(url: string): boolean {
+  const u = url.trim();
+  if (/^(https?:|mailto:)/i.test(u)) return true;
+  // Relative or anchor links (no scheme) are safe; a leading scheme-like token is not.
+  return /^(\/|#|\.\/|\.\.\/)/.test(u) || !/^[a-z][a-z0-9+.-]*:/i.test(u);
+}
+
 export function Markdown({ text }: { text: string }) {
   const blocks = text.split("\n");
   const elements: React.ReactNode[] = [];
@@ -110,7 +119,16 @@ function inline(text: string): React.ReactNode[] {
     match = remaining.match(/^(.*?)\[(.+?)\]\((.+?)\)(.*)/s);
     if (match) {
       if (match[1]) parts.push(<span key={key++}>{match[1]}</span>);
-      parts.push(<a key={key++} href={match[3]} target="_blank" rel="noopener" style={{ color: "var(--accent)", textDecoration: "underline" }}>{match[2]}</a>);
+      // Only allow safe schemes. Assistant output is untrusted (prompt
+      // injection), and React does NOT block `javascript:`/`data:` hrefs — a
+      // crafted link could exfiltrate the user's BYO API keys on click. Render
+      // an unsafe URL as plain text instead.
+      const href = isSafeHref(match[3]) ? match[3] : null;
+      parts.push(
+        href
+          ? <a key={key++} href={href} target="_blank" rel="noopener" style={{ color: "var(--accent)", textDecoration: "underline" }}>{match[2]}</a>
+          : <span key={key++}>{match[2]}</span>,
+      );
       remaining = match[4] ?? "";
       continue;
     }

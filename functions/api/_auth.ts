@@ -14,16 +14,26 @@ export interface SessionEnv {
   JWT_SECRET?: string;
 }
 
-const ALLOWED_ORIGIN = /^https:\/\/[\w-]+\.freegamestore\.online$/;
+// First-party origins ONLY. The old `*.freegamestore.online` wildcard reflected
+// game subdomains too — and games are untrusted user content sharing the
+// session cookie's registrable domain, so any game could read this credentialed
+// API (project list, chat history, /api/me) cross-origin. Pin to the console +
+// storefront + dev origins.
+const FIRST_PARTY_ORIGINS = new Set([
+  "https://console.freegamestore.online",
+  "https://freegamestore.online",
+  "http://localhost:5173",
+]);
 
 export function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get("Origin") ?? "";
-  const allow = ALLOWED_ORIGIN.test(origin) ? origin : "https://console.freegamestore.online";
+  const allow = FIRST_PARTY_ORIGINS.has(origin) ? origin : "https://console.freegamestore.online";
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin",
   };
 }
 
@@ -50,7 +60,8 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
     const ok = await crypto.subtle.verify("HMAC", key, b64urlToBytes(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
-    if (typeof payload.exp === "number" && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    // Require a numeric, unexpired exp — a token missing exp must not verify forever.
+    if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;
