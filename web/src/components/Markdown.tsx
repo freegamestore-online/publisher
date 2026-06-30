@@ -123,7 +123,8 @@ function inline(text: string): React.ReactNode[] {
       // injection), and React does NOT block `javascript:`/`data:` hrefs — a
       // crafted link could exfiltrate the user's BYO API keys on click. Render
       // an unsafe URL as plain text instead.
-      const href = isSafeHref(match[3]) ? match[3] : null;
+      const rawHref = match[3] ?? "";
+      const href = isSafeHref(rawHref) ? rawHref : null;
       parts.push(
         href
           ? <a key={key++} href={href} target="_blank" rel="noopener" style={{ color: "var(--accent)", textDecoration: "underline" }}>{match[2]}</a>
