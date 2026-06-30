@@ -35,13 +35,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const body = await context.request.json() as Record<string, string>;
   const id = body.id;
-  const name = body.name || id;
-  const category = body.category || "arcade";
-  const icon = body.icon || "";
-  const iconBg = body.iconBg || "#1a2e26";
-  const description = body.description || name;
-
   if (!id) return json({ error: "id required" }, 400);
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(id)) return json({ error: "invalid id" }, 400);
+
+  // SEC: this metadata is persisted to the public registry.json and rendered by the
+  // storefront. Sanitize to prevent stored XSS / markup injection.
+  const clean = (s: string | undefined, max: number) => (s ?? "").slice(0, max).replace(/[<>&"']/g, "").trim();
+  const name = clean(body.name, 80) || id;
+  const description = clean(body.description, 300) || name;
+  const category = (body.category || "arcade").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 32) || "arcade";
+  const icon = clean(body.icon, 16);
+  const iconBg = /^#[0-9a-fA-F]{3,8}$/.test(body.iconBg || "") ? body.iconBg : "#1a2e26";
 
   // Verify the repo exists and user has access
   const collabRes = await fetch(`https://api.github.com/repos/${CONFIG.org}/${id}/collaborators/${user}`, {

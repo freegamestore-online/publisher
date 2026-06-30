@@ -25,12 +25,42 @@ const TEMPLATES: Record<string, string> = {
   "3d": "template-game-3d",
 };
 
+// Reserved / infrastructure repos that must never be targetable via /api/create.
+const INFRA_REPOS = new Set([
+  "freegamestore", "submissions", "template-game-canvas", "template-game-3d",
+  "template-game-grid", "template-game-cards", "brand", "ops", "sdk",
+]);
+
 function validateId(id: string): string | null {
   if (!id) return "ID is required";
   if (id.length > 58) return "ID must be 58 characters or less";
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(id)) return "Lowercase letters, numbers, dashes only. No start/end dash.";
   if (id.startsWith("free") || id.startsWith("pro")) return "Cannot start with 'free' or 'pro'";
+  if (INFRA_REPOS.has(id)) return "Reserved id";
   return null;
+}
+
+const gh = (token: string) => ({
+  Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "freegamestore-publisher",
+});
+
+/** True if `user` is already a collaborator on org/id (GitHub returns 204). */
+async function isCollaborator(org: string, id: string, user: string, token: string): Promise<boolean> {
+  const r = await fetch(`https://api.github.com/repos/${org}/${id}/collaborators/${user}`, { headers: gh(token) });
+  return r.status === 204;
+}
+
+/** Count games this user already has access to (mirrors api/me.ts, infra excluded). */
+async function countUserGames(org: string, user: string, token: string): Promise<number> {
+  const res = await fetch(`https://api.github.com/orgs/${org}/repos?per_page=100`, { headers: gh(token) });
+  const repos = (await res.json()) as { name: string }[];
+  if (!Array.isArray(repos)) return 0;
+  const candidates = repos.filter((r) => !INFRA_REPOS.has(r.name));
+  // Org members/owners effectively own everything — don't limit them here.
+  const member = await fetch(`https://api.github.com/orgs/${org}/members/${user}`, { headers: gh(token) });
+  if (member.status === 204) return 0;
+  const checks = await Promise.all(candidates.map((r) => isCollaborator(org, r.name, user, token)));
+  return checks.filter(Boolean).length;
 }
 
 /**
@@ -46,6 +76,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   if (!user) return json({ error: "Unauthorized" }, 401);
 
+  // Reject suspended creators (api/me.ts surfaces `banned`; create must honor it too).
+  const kvRaw = await context.env.CREATORS.get(user);
+  if (kvRaw) {
+    try { if ((JSON.parse(kvRaw) as { banned?: boolean }).banned) return json({ error: "Account suspended" }, 403); }
+    catch { /* ignore malformed record */ }
+  }
+
   const body = await context.request.json() as Record<string, string>;
   const idErr = validateId(body.id);
   if (idErr) return json({ error: idErr }, 400);
@@ -59,16 +96,27 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const cfProject = `free${id}app`;
   const steps: { name: string; status: string; detail: string }[] = [];
 
-  // 1. Create GitHub repo from template
-  const repoCheck = await fetch(`https://api.github.com/repos/${CONFIG.org}/${id}`, {
-    headers: { Authorization: `Bearer ${context.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "freegamestore-publisher" },
-  });
-  if ((await repoCheck.json() as Record<string, unknown>).id) {
+  // 1. Create GitHub repo from template (or attach to one the caller already owns)
+  const repoCheck = await fetch(`https://api.github.com/repos/${CONFIG.org}/${id}`, { headers: gh(context.env.GITHUB_TOKEN) });
+  const repoExisted = !!((await repoCheck.json()) as Record<string, unknown>).id;
+
+  if (repoExisted) {
+    // SEC: never grant access to an already-existing repo unless the caller is
+    // already a collaborator. Otherwise any signed-in user could attach to another
+    // creator's game (or an infra repo) and push auto-deploying code.
+    if (!(await isCollaborator(CONFIG.org, id, user, context.env.GITHUB_TOKEN))) {
+      return json({ error: "A game with this id already exists" }, 409);
+    }
     steps.push({ name: "GitHub repo", status: "skip", detail: "Already exists" });
   } else {
+    // SEC: enforce the per-creator game limit, but only when creating a new repo.
+    const max = parseInt(context.env.MAX_APPS_PER_USER || "5", 10);
+    if (await countUserGames(CONFIG.org, user, context.env.GITHUB_TOKEN) >= max) {
+      return json({ error: `Game limit reached (${max} per creator)` }, 403);
+    }
     const createRes = await fetch(`https://api.github.com/repos/${CONFIG.org}/${templateRepo}/generate`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${context.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "freegamestore-publisher", "X-GitHub-Api-Version": "2022-11-28" },
+      headers: { ...gh(context.env.GITHUB_TOKEN), "X-GitHub-Api-Version": "2022-11-28" },
       body: JSON.stringify({ owner: CONFIG.org, name: id, private: false, description }),
     });
     const createData = await createRes.json() as Record<string, unknown>;
