@@ -17,13 +17,12 @@ interface OrgRepo {
   updatedAt: string;
 }
 
-// Platform/infra repos to exclude
-const EXCLUDED = new Set([
-  "freeappstore", "freegamestore", "admin", "sdk", "template-standalone",
-  "template-connected", "template-game-canvas", "template-game-cards",
-  "template-game-grid", "template-game-3d", "submissions", "create",
-  "ai", "vault", "ops", "brand",
-]);
+interface CreatorGame {
+  id: string;
+  name: string;
+  liveUrl?: string;
+  createdAt?: string;
+}
 
 export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose }: ProjectPickerProps) {
   const [orgRepos, setOrgRepos] = useState<OrgRepo[]>([]);
@@ -33,23 +32,27 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
   const [tab, setTab] = useState<"all" | "new">("all");
 
   useEffect(() => {
-    // Fetch ALL repos from the org via GitHub API (works for any creation method)
-    fetch("https://api.github.com/orgs/freegamestore-online/repos?per_page=100&sort=updated&direction=desc", {
-      headers: { Accept: "application/vnd.github+json" },
-    })
-      .then((r) => r.json())
-      .then((repos) => {
-        if (!Array.isArray(repos)) return;
-        const apps = repos
-          .filter((r: { name: string }) => !EXCLUDED.has(r.name) && !r.name.startsWith("template-"))
-          .map((r: { name: string; description?: string; pushed_at?: string }) => ({
-            id: r.name,
-            name: r.name,
-            description: r.description || "",
-            url: `https://${r.name}.freegamestore.online`,
-            updatedAt: r.pushed_at || "",
-          }));
-        setOrgRepos(apps);
+    // The signed-in creator's games, from the same registry-backed, ownership-
+    // scoped endpoint the dashboard uses. This replaces an anonymous "list ALL
+    // org repos minus a name denylist" fetch, which (a) leaked infra repos
+    // (platform, publisher, mcp, agent, leaderboard, host, auth…) whenever a new
+    // one was added and the denylist wasn't updated, and (b) showed every
+    // creator's games to everyone. The registry has no entry for infra repos, so
+    // they can never appear here.
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { creator?: { games?: CreatorGame[] } } | null) => {
+        const games = data?.creator?.games;
+        if (!Array.isArray(games)) return;
+        setOrgRepos(
+          games.map((g) => ({
+            id: g.id,
+            name: g.name || g.id,
+            description: "",
+            url: g.liveUrl || `https://${g.id}.freegamestore.online`,
+            updatedAt: g.createdAt || "",
+          })),
+        );
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -59,7 +62,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
   const q = search.toLowerCase();
   const localIds = new Set(projects.map((p) => p.appId).filter(Boolean));
   const filteredLocal = projects.filter((p) => !q || p.name.toLowerCase().includes(q) || p.appId?.toLowerCase().includes(q));
-  const orgOnly = orgRepos.filter((r) => !localIds.has(r.id) && !EXCLUDED.has(r.id) && (!q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q)));
+  const orgOnly = orgRepos.filter((r) => !localIds.has(r.id) && (!q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q)));
 
   function handleSelectOrg(repo: OrgRepo) {
     // Create a new VibeCode session for this org repo

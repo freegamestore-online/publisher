@@ -43,6 +43,7 @@ function uidFromAvatar(avatarUrl: string): number | null {
 interface AuthContextValue {
   user: AuthUser | null;
   creator: CreatorRecord | null;
+  creatorError: string | null;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
@@ -54,6 +55,7 @@ interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue>({
   user: null,
   creator: null,
+  creatorError: null,
   loading: true,
   error: null,
   refetch: async () => {},
@@ -71,6 +73,7 @@ export function useAuth() {
 export function useAuthProvider(): AuthContextValue {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [creator, setCreator] = useState<CreatorRecord | null>(null);
+  const [creatorError, setCreatorError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,7 +118,10 @@ export function useAuthProvider(): AuthContextValue {
     }
   }, []);
 
-  // Lazy fetch creator/game list — only called by pages that need it (Dashboard)
+  // Lazy fetch creator/game list — only called by pages that need it (Dashboard).
+  // A failure here must NOT be silently swallowed: the dashboard used to gate its
+  // sign-in prompt on `!creator`, so a failed /api/me made a signed-in user see
+  // "Sign in to publish." Surface the error so the UI can show a retry instead.
   const fetchCreator = useCallback(async () => {
     if (creator) return;
     try {
@@ -123,9 +129,12 @@ export function useAuthProvider(): AuthContextValue {
       if (creatorRes.ok) {
         const creatorData = (await creatorRes.json()) as { creator: CreatorRecord };
         setCreator(creatorData.creator);
+        setCreatorError(null);
+      } else {
+        setCreatorError(`Couldn't load your games (${creatorRes.status}). Please retry.`);
       }
     } catch {
-      // silently ignore — creator data is non-critical
+      setCreatorError("Couldn't load your games. Check your connection and retry.");
     }
   }, [creator]);
 
@@ -148,5 +157,5 @@ export function useAuthProvider(): AuthContextValue {
     window.location.href = "/";
   }, []);
 
-  return { user, creator, loading, error, refetch, fetchCreator, signIn, signOut };
+  return { user, creator, creatorError, loading, error, refetch, fetchCreator, signIn, signOut };
 }

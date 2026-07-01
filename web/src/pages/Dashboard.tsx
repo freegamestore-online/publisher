@@ -5,15 +5,21 @@ import { LoadingShell, SignInShell, ErrorShell } from "../components/PageShell";
 import { useAuth, type GameRepo } from "../hooks/useAuth";
 
 export function Dashboard() {
-  const { user, creator, loading, error, refetch, fetchCreator, signIn } = useAuth();
+  const { user, creator, creatorError, loading, error, refetch, fetchCreator, signIn } = useAuth();
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => { fetchCreator(); }, [fetchCreator]);
 
   if (loading) return <LoadingShell />;
   if (error) return <ErrorShell message={error} />;
-  if (!user || !creator) {
+  // Only prompt sign-in when genuinely signed out. A signed-in user whose game
+  // list failed to load is NOT signed out — show the error (with retry), never
+  // "Sign in to publish."
+  if (!user) {
     return <SignInShell onSignIn={signIn} message="Sign in with GitHub to publish games on FreeGameStore." />;
+  }
+  if (!creator) {
+    return creatorError ? <ErrorShell message={creatorError} /> : <LoadingShell />;
   }
 
   if (creator.banned) {
