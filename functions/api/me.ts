@@ -86,22 +86,80 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   );
   const isOrgMember = memberRes.status === 204;
   const lc = user.toLowerCase();
-  const owned = games.filter(
-    (g) =>
-      isOrgMember ||
-      g.creatorGithub?.toLowerCase() === lc ||
-      g.developer?.toLowerCase() === lc,
-  );
+  const gh = (path: string) =>
+    fetch(`https://api.github.com${path}`, {
+      headers: {
+        Authorization: `Bearer ${context.env.GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "freegamestore-publisher",
+      },
+    });
 
-  const userGames: GameRepo[] = owned.map((g) => ({
+  const registryToRepo = (g: RegistryGame, published: boolean): GameRepo => ({
     id: g.id,
     name: g.name || g.id.charAt(0).toUpperCase() + g.id.slice(1),
     previewUrl: g.appUrl || `https://${g.id}.freegamestore.online`,
     liveUrl: g.appUrl || `https://${g.id}.freegamestore.online`,
     repoUrl: g.repo ? `https://github.com/${g.repo}` : `https://github.com/${ORG}/${g.id}`,
     createdAt: g.firstPublished || "",
-    published: true,
-  }));
+    published,
+  });
+
+  let userGames: GameRepo[];
+  if (isOrgMember) {
+    // Admin view: every published game in the registry.
+    userGames = games.map((g) => registryToRepo(g, true));
+  } else {
+    // Creator view: the repos they're a direct collaborator on — that's exactly
+    // their own games (create.ts adds them as a collaborator on provision) and,
+    // crucially, includes DRAFTS that were provisioned but not yet registered.
+    // A non-member is never a collaborator on infra repos, so this can't leak
+    // platform/agent/mcp/etc. — no name denylist needed. A game counts as
+    // "published" only if it also has a registry entry.
+    const byId = new Map(games.map((g) => [g.id, g]));
+    let repos: Array<{ name: string; created_at?: string }> = [];
+    try {
+      const reposRes = await gh(`/orgs/${ORG}/repos?per_page=100`);
+      if (reposRes.ok) repos = (await reposRes.json()) as typeof repos;
+    } catch {
+      /* org repo list unreachable — fall back to registry-owned games below */
+    }
+
+    const collab = await Promise.all(
+      repos.map(async (r) => {
+        try {
+          const res = await gh(`/repos/${ORG}/${r.name}/collaborators/${user}`);
+          return res.status === 204 ? r : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    userGames = collab
+      .filter((r): r is { name: string; created_at?: string } => r !== null)
+      .map((r) => {
+        const reg = byId.get(r.name);
+        if (reg) return registryToRepo(reg, true);
+        return {
+          id: r.name,
+          name: r.name.charAt(0).toUpperCase() + r.name.slice(1),
+          previewUrl: `https://${r.name}.freegamestore.online`,
+          liveUrl: `https://${r.name}.freegamestore.online`,
+          repoUrl: `https://github.com/${ORG}/${r.name}`,
+          createdAt: r.created_at?.split("T")[0] || "",
+          published: false,
+        };
+      });
+
+    // Safety net: if the repo list was unreachable, still surface registry-owned
+    // games so the dashboard isn't empty.
+    if (userGames.length === 0) {
+      userGames = games
+        .filter((g) => g.creatorGithub?.toLowerCase() === lc || g.developer?.toLowerCase() === lc)
+        .map((g) => registryToRepo(g, true));
+    }
+  }
 
   // KV for ban status.
   const raw = await context.env.CREATORS.get(user);
