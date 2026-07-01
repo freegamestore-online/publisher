@@ -5,7 +5,7 @@ import { DeployLog } from "../components/DeployLog";
 import { ProjectPicker } from "../components/ProjectPicker";
 import { useAuth } from "../hooks/useAuth";
 import { useAgent, type AIConfig, type Project } from "../hooks/useAgent";
-import { getKey } from "../lib/ai-keys";
+import { getKey, resolveInitialProvider } from "../lib/ai-keys";
 
 const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
   github: [
@@ -41,8 +41,16 @@ export function Create() {
   const agent = useAgent();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [provider, setProvider] = useState(() => localStorage.getItem("fgs_provider") || "openrouter");
-  const [model, setModel] = useState(() => localStorage.getItem("fgs_model") || "anthropic/claude-sonnet-4");
+  // Start on a provider the user can actually use (stored choice if it has a
+  // key, else any provider they have a key for, else free GitHub Models) — not
+  // a hardcoded OpenRouter default that ignores their available keys.
+  const [provider, setProvider] = useState(resolveInitialProvider);
+  const [model, setModel] = useState(() => {
+    const p = resolveInitialProvider();
+    const opts = MODEL_OPTIONS[p] ?? [];
+    const stored = localStorage.getItem("fgs_model");
+    return stored && opts.some((o) => o.value === stored) ? stored : (opts[0]?.value ?? "openai/gpt-4.1");
+  });
   const [apiKey, setApiKey] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [settingsOpen, setSettingsOpen] = useState(false);

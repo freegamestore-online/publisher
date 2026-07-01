@@ -114,8 +114,33 @@ export function deleteAllKeys() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+/** Whether a provider needs no API key (free tier — e.g. GitHub Models). */
+export function isFreeProvider(provider: string): boolean {
+  return PROVIDERS.find((p) => p.type === provider)?.free ?? false;
+}
+
+/** A provider is usable right now if it's free or the user has saved a key for it. */
+export function providerUsable(provider: string): boolean {
+  return isFreeProvider(provider) || !!getKey(provider);
+}
+
+/**
+ * Which provider to start with. Prefers the user's stored choice when it's
+ * actually usable, otherwise the first provider they have a key for, otherwise
+ * the free default (GitHub Models). This is what stops the composer defaulting
+ * to a provider (OpenRouter) the user has no key for while a usable key — say
+ * Anthropic or OpenAI — sits unused.
+ */
+export function resolveInitialProvider(): string {
+  const stored = localStorage.getItem("fgs_provider");
+  if (stored && providerUsable(stored)) return stored;
+  const withKey = PROVIDERS.find((p) => !p.free && getKey(p.type));
+  if (withKey) return withKey.type;
+  return "github";
+}
+
 export function getDefaultProvider(): string {
-  return localStorage.getItem("fgs_provider") || "github";
+  return resolveInitialProvider();
 }
 
 export function getDefaultModel(): string {
