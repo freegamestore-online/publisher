@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useProjects, type Project } from "./useProjects";
 
 export type { Project };
 
 const AGENT_URL = "https://agent.freegamestore.online";
+const DEFAULT_MESSAGES: AgentMessage[] = [{ role: "system", content: "Describe the game you want to build." }];
 
 /** A single message in the agent conversation (user, assistant, tool, or system). */
 export interface AgentMessage {
@@ -26,18 +27,61 @@ export interface AIConfig {
 /** Manages the VibeCode agent session — chat messages, streaming, deploy state, and project switching. */
 export function useAgent() {
   const projectsMgr = useProjects();
-  const [messages, setMessages] = useState<AgentMessage[]>([{ role: "system" as const, content: "Describe the game you want to build." }]);
+  const sessionId = projectsMgr.currentId;
+  const [messages, setMessages] = useState<AgentMessage[]>(DEFAULT_MESSAGES);
   const [isStreaming, setIsStreaming] = useState(false);
   const [tokensIn, setTokensIn] = useState(0);
   const [tokensOut, setTokensOut] = useState(0);
   const [deployState, setDeployState] = useState<DeployState | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+  const skipNextSyncRef = useRef(false);
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
-  const sessionId = projectsMgr.currentId;
+  useEffect(() => {
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      return;
+    }
+    if (isStreaming || messages.length <= 1 || !sessionId) return;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/agent/sessions/${sessionId}/messages`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages.slice(-300) }),
+      }).catch(() => {});
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, messages, isStreaming]);
+
+  useEffect(() => {
+    const flush = () => {
+      const sid = sessionIdRef.current;
+      const current = messagesRef.current;
+      if (!sid || current.length <= 1 || isStreamingRef.current) return;
+      fetch(`/api/agent/sessions/${sid}/messages`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: current.slice(-300) }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, []);
 
   const resetUI = useCallback(() => {
-    setMessages([{ role: "system", content: "Describe the game you want to build." }]);
+    setMessages(DEFAULT_MESSAGES);
     setDeployState(null);
     setTokensIn(0);
     setTokensOut(0);
@@ -55,27 +99,66 @@ export function useAgent() {
   }, [projectsMgr, resetUI]);
 
   const loadHistory = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setMessages(DEFAULT_MESSAGES);
+      setDeployState(null);
+      return;
+    }
+    if (isStreamingRef.current) return;
     try {
-      const historyRes = await fetch(`${AGENT_URL}/session/${sessionId}/history`);
-      if (!historyRes.ok) return;
-      const historyData = await historyRes.json();
-      if (!historyData.messages?.length) return;
-      const restored = restoreMessages(historyData.messages);
-      if (restored.length > 0) setMessages(restored);
-      if (historyData.deployStatus?.phase === "live") {
-        setDeployState(historyData.deployStatus);
-        if (historyData.appId) projectsMgr.markDeployed(sessionId, historyData.appId, historyData.deployStatus.appUrl || "");
+      const historyRes = await fetch(`${AGENT_URL}/session/${sessionId}/history`, { credentials: "include" });
+      // Bail if the user switched projects while this was in flight — otherwise
+      // the old session's history overwrites the new one's, and the debounced
+      // sync then PUTs it back, corrupting the new session's stored transcript.
+      if (sessionIdRef.current !== sessionId) return;
+      if (historyRes.ok) {
+        const historyData = await historyRes.json();
+        if (sessionIdRef.current !== sessionId) return;
+        const restored = restoreMessages(historyData.messages || []);
+        if (restored.length > 0) {
+          skipNextSyncRef.current = true;
+          setMessages(restored);
+          setDeployState(historyData.deployStatus ?? null);
+          if (historyData.deployStatus?.phase === "live" && historyData.appId) {
+            projectsMgr.markDeployed(sessionId, historyData.appId, historyData.deployStatus.appUrl || "");
+          } else if (historyData.appName) {
+            projectsMgr.rename(sessionId, historyData.appName);
+          }
+          return;
+        }
       }
-      if (historyData.appName) projectsMgr.rename(sessionId, historyData.appName);
-    } catch { /* ignore */ }
-  }, [sessionId, projectsMgr]);
+
+      const d1Res = await fetch(`/api/agent/sessions/${sessionId}`);
+      if (sessionIdRef.current !== sessionId) return;
+      if (d1Res.ok) {
+        const data = (await d1Res.json()) as { session?: { messages?: AgentMessage[]; deployState?: DeployState | null; appId?: string; appUrl?: string; name?: string } | null };
+        if (sessionIdRef.current !== sessionId) return;
+        if (data.session?.messages?.length) {
+          skipNextSyncRef.current = true;
+          setMessages(data.session.messages);
+        }
+        setDeployState(data.session?.deployState ?? null);
+        if (data.session?.deployState?.phase === "live" && data.session.appId) {
+          projectsMgr.markDeployed(sessionId, data.session.appId, data.session.deployState.appUrl || data.session.appUrl || "");
+        } else if (data.session?.name) {
+          projectsMgr.rename(sessionId, data.session.name);
+        }
+      }
+    } catch {
+      // The composer remains usable; the next focus/reload can retry history.
+    }
+  }, [sessionId, projectsMgr.markDeployed, projectsMgr.rename]);
 
   const sendMessage = useCallback(async (message: string, aiConfig: AIConfig) => {
     if (!sessionId || isStreaming) return;
     setIsStreaming(true);
     setMessages((prev) => [...prev, { role: "user", content: message }, { role: "assistant", content: "" }]);
     let assistantText = "";
+    // When a tool interrupts the assistant's prose, the next text delta must
+    // open a NEW assistant bubble *below* the tool line. Otherwise post-tool
+    // prose is glued onto the pre-tool bubble and renders above the tool
+    // activity — wrong order on every multi-tool (i.e. every real build) turn.
+    let pendingNewAssistant = false;
 
     // Update the LAST assistant message in the array
     const updateAssistant = (content: string) => {
@@ -91,10 +174,22 @@ export function useAgent() {
       });
     };
 
+    // Append streamed assistant text, starting a fresh bubble after a tool.
+    const appendAssistant = (delta: string) => {
+      if (pendingNewAssistant) {
+        pendingNewAssistant = false;
+        assistantText = "";
+        setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      }
+      assistantText += delta;
+      updateAssistant(assistantText);
+    };
+
     try {
       const chatRes = await fetch(`${AGENT_URL}/session/${sessionId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ message, aiConfig }),
       });
       if (!chatRes.ok) { updateAssistant(`Error: ${await chatRes.text()}`); return; }
@@ -115,44 +210,49 @@ export function useAgent() {
           let evt;
           try { evt = JSON.parse(line.slice(6).trim()); } catch { continue; }
 
-          switch (evt.type) {
-            case "text":
-              assistantText += evt.data;
-              updateAssistant(assistantText);
-              break;
-            case "tool_call": {
-              const tc = JSON.parse(evt.data);
-              setMessages((prev) => [...prev, { role: "tool", content: toolLabel(tc) }]);
-              break;
-            }
-            case "tool_result": {
-              const tr = JSON.parse(evt.data);
-              if (tr.tool === "deploy") setDeployState({ phase: "provisioning", steps: [] });
-              else if (!["write_file", "read_file", "list_files", "delete_file"].includes(tr.tool) && tr.result) {
-                setMessages((prev) => [...prev, { role: "tool", content: `${tr.tool}:\n${tr.result.slice(0, 400)}` }]);
+          // A malformed nested payload on one event must not throw out of the
+          // read loop (which would truncate the whole turn as a "connection
+          // error"). Isolate each event.
+          try {
+            switch (evt.type) {
+              case "text":
+                appendAssistant(evt.data);
+                break;
+              case "tool_call": {
+                const tc = JSON.parse(evt.data);
+                setMessages((prev) => [...prev, { role: "tool", content: toolLabel(tc) }]);
+                pendingNewAssistant = true;
+                break;
               }
-              break;
-            }
-            case "usage": {
-              const u = JSON.parse(evt.data);
-              if (u.input) setTokensIn((p) => p + u.input);
-              if (u.output) setTokensOut((p) => p + u.output);
-              break;
-            }
-            case "deploy_status": {
-              const ds = JSON.parse(evt.data);
-              setDeployState(ds);
-              if (ds.phase === "live" && ds.appUrl && sessionId) {
-                const host = ds.appUrl.replace("https://", "").split("/")[0].split(".")[0];
-                projectsMgr.markDeployed(sessionId, host, ds.appUrl);
+              case "tool_result": {
+                const tr = JSON.parse(evt.data);
+                if (tr.tool === "deploy") setDeployState({ phase: "provisioning", steps: [] });
+                else if (!["write_file", "read_file", "list_files", "delete_file"].includes(tr.tool) && tr.result) {
+                  setMessages((prev) => [...prev, { role: "tool", content: `${tr.tool}:\n${tr.result.slice(0, 400)}` }]);
+                  pendingNewAssistant = true;
+                }
+                break;
               }
-              break;
+              case "usage": {
+                const u = JSON.parse(evt.data);
+                if (u.input) setTokensIn((p) => p + u.input);
+                if (u.output) setTokensOut((p) => p + u.output);
+                break;
+              }
+              case "deploy_status": {
+                const ds = JSON.parse(evt.data);
+                setDeployState(ds);
+                if (ds.phase === "live" && ds.appUrl && sessionId) {
+                  const host = ds.appUrl.replace("https://", "").split("/")[0].split(".")[0];
+                  projectsMgr.markDeployed(sessionId, host, ds.appUrl);
+                }
+                break;
+              }
+              case "error":
+                appendAssistant(`\nError: ${evt.data}`);
+                break;
             }
-            case "error":
-              assistantText += `\nError: ${evt.data}`;
-              updateAssistant(assistantText);
-              break;
-          }
+          } catch { /* skip a single malformed event, keep the stream alive */ }
         }
       }
       if (!assistantText) updateAssistant("(No response)");
