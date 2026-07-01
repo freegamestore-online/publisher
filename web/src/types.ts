@@ -3,4 +3,8 @@ export interface DeployState {
   steps?: { name: string; status: string }[];
   appUrl?: string;
   error?: string;
+  /** When phase === "error", the pipeline phase that was in progress when it
+   *  failed. The server's error event carries no step info, so useAgent
+   *  captures the prior phase to let DeployLog highlight the failed step. */
+  failedPhase?: string;
 }

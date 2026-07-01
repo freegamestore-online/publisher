@@ -241,7 +241,14 @@ export function useAgent() {
               }
               case "deploy_status": {
                 const ds = JSON.parse(evt.data);
-                setDeployState(ds);
+                // The server's error event carries only { phase, error } — no
+                // steps and no indication of which step failed. Preserve the
+                // in-progress steps/phase so DeployLog can highlight the failure.
+                setDeployState((prev) =>
+                  ds.phase === "error" && prev
+                    ? { ...ds, steps: ds.steps ?? prev.steps, failedPhase: prev.phase }
+                    : ds,
+                );
                 if (ds.phase === "live" && ds.appUrl && sessionId) {
                   const host = ds.appUrl.replace("https://", "").split("/")[0].split(".")[0];
                   projectsMgr.markDeployed(sessionId, host, ds.appUrl);
@@ -265,12 +272,22 @@ export function useAgent() {
       }
     } finally {
       setIsStreaming(false);
+      // If the stream ended (cleanly or by a dropped connection) while a deploy
+      // was still provisioning/pushing/building — with no terminal live/error
+      // deploy_status — don't leave the spinner stuck forever. Resolve it to a
+      // recoverable error state. Terminal phases (live/error) are left as-is.
+      setDeployState((prev) =>
+        prev && prev.phase !== "live" && prev.phase !== "error"
+          ? { ...prev, phase: "error", failedPhase: prev.phase, error: "Deploy status unknown — the connection ended before the deploy finished. Reload to check whether it completed." }
+          : prev,
+      );
     }
   }, [sessionId, isStreaming, projectsMgr]);
 
   return {
     messages, isStreaming, tokensIn, tokensOut, deployState,
     projects: projectsMgr.projects, currentProjectId: projectsMgr.currentId,
+    projectsError: projectsMgr.loadError, reloadProjects: projectsMgr.reload,
     sendMessage, createProject, switchProject, loadHistory,
   };
 }

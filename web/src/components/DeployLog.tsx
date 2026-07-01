@@ -11,8 +11,14 @@ const DEPLOY_PIPELINE = [
 const PHASE_ORDER = ["provisioning", "pushing", "building", "live"];
 
 export function DeployLog({ state }: { state: DeployState }) {
-  const phaseIdx = PHASE_ORDER.indexOf(state.phase);
   const isError = state.phase === "error";
+  // "error" is not itself a pipeline phase, so locate progress via the phase
+  // that was active when the failure happened (captured by useAgent). On the
+  // happy path this is just the current phase.
+  const phaseIdx = PHASE_ORDER.indexOf(isError ? (state.failedPhase ?? "") : state.phase);
+  // If any provisioning step reported an explicit failure, trust it — don't
+  // also mark later same-phase steps (e.g. CF Pages) that were never reached.
+  const hasExplicitFail = !!state.steps?.some((s) => s.status === "fail");
 
   return (
     <div className="w-full p-6" style={{ fontSize: "0.85rem" }}>
@@ -28,8 +34,8 @@ export function DeployLog({ state }: { state: DeployState }) {
             status = "done";
           } else if (isError) {
             const stepPhaseIdx = PHASE_ORDER.findIndex((p) => step.phases.includes(p));
-            if (stepPhaseIdx < phaseIdx) status = "done";
-            else if (stepPhaseIdx === phaseIdx) status = "fail";
+            if (phaseIdx >= 0 && stepPhaseIdx < phaseIdx) status = "done";
+            else if (phaseIdx >= 0 && stepPhaseIdx === phaseIdx && !hasExplicitFail) status = "fail";
           } else {
             const stepPhaseIdx = PHASE_ORDER.findIndex((p) => step.phases.includes(p));
             if (stepPhaseIdx < phaseIdx) status = "done";

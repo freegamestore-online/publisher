@@ -163,6 +163,8 @@ export function Create() {
         <ProjectPicker
           projects={agent.projects}
           currentId={agent.currentProjectId}
+          loadError={agent.projectsError}
+          onRetry={agent.reloadProjects}
           onSelect={(id) => agent.switchProject(id)}
           onCreate={(name, appId) => agent.createProject(name, appId)}
           onClose={() => setPickerOpen(false)}

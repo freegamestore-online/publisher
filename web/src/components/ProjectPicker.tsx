@@ -4,6 +4,8 @@ import type { Project } from "../hooks/useProjects";
 interface ProjectPickerProps {
   projects: Project[];
   currentId: string | null;
+  loadError?: boolean;
+  onRetry?: () => void;
   onSelect: (id: string) => void;
   onCreate: (name: string, appId?: string) => void;
   onClose: () => void;
@@ -43,7 +45,7 @@ function StatusPill({ published }: { published: boolean }) {
   );
 }
 
-export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose }: ProjectPickerProps) {
+export function ProjectPicker({ projects, currentId, loadError, onRetry, onSelect, onCreate, onClose }: ProjectPickerProps) {
   const [orgRepos, setOrgRepos] = useState<OrgRepo[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
@@ -176,6 +178,23 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
         <div className="flex-1 overflow-y-auto p-3" style={{ minHeight: 0 }}>
           {tab === "all" ? (
             <>
+              {/* Couldn't load the creator's sessions (e.g. expired auth). */}
+              {loadError && (
+                <div className="text-center py-6 text-sm" style={{ color: "var(--muted)" }}>
+                  <p style={{ color: "#ef4444" }}>Couldn't load your projects.</p>
+                  <p className="mt-1">You may need to sign in again.</p>
+                  {onRetry && (
+                    <button
+                      onClick={onRetry}
+                      className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                      style={{ background: "var(--accent)", color: "#000", border: "none", cursor: "pointer" }}
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Local projects (have VibeCode sessions) */}
               {filteredLocal.length > 0 && (
                 <div className="mb-3">
@@ -213,7 +232,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
                 </div>
               ) : null}
 
-              {nothingToShow && (
+              {nothingToShow && !loadError && (
                 <div className="text-center py-6 text-sm" style={{ color: "var(--muted)" }}>
                   No {status === "all" ? "" : `${status} `}games{search ? " match your search" : " yet"}.
                 </div>
