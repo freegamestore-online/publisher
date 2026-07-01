@@ -128,6 +128,22 @@ export function Create() {
             settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
             setPickerOpen={setPickerOpen}
           />
+          {agent.error && (
+            <div
+              role="alert"
+              className="shrink-0 flex items-start gap-2 px-3 py-2 text-sm"
+              style={{ background: "rgba(239,68,68,0.12)", borderBottom: "1px solid var(--error, #ef4444)", color: "var(--error, #ef4444)" }}
+            >
+              <span style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{agent.error}</span>
+              <button
+                onClick={agent.dismissError}
+                aria-label="Dismiss error"
+                style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0 0.25rem" }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2" style={{ minHeight: 0 }}>
             <div className="flex-1" />
             {agent.messages.map((m, i) => <ChatMessage key={i} role={m.role} content={m.content} />)}

@@ -33,6 +33,11 @@ export function useAgent() {
   const [tokensIn, setTokensIn] = useState(0);
   const [tokensOut, setTokensOut] = useState(0);
   const [deployState, setDeployState] = useState<DeployState | null>(null);
+  // Sticky error banner. Chat/deploy errors used to live only as a chat bubble,
+  // so any session reset (e.g. the jump to a fresh "New Game") wiped them and
+  // the user never saw what failed. This survives loadHistory/auto-reset and is
+  // cleared only on an explicit new send, a project switch, or manual dismiss.
+  const [error, setError] = useState<string | null>(null);
   const isStreamingRef = useRef(isStreaming);
   isStreamingRef.current = isStreaming;
   const sessionIdRef = useRef(sessionId);
@@ -48,6 +53,7 @@ export function useAgent() {
     setDeployState(null);
     setTokensIn(0);
     setTokensOut(0);
+    setError(null);
   }, []);
 
   const createProject = useCallback((name: string, appId?: string) => {
@@ -95,6 +101,7 @@ export function useAgent() {
   const sendMessage = useCallback(async (message: string, aiConfig: AIConfig) => {
     if (!sessionId || isStreaming) return;
     setIsStreaming(true);
+    setError(null);
     setMessages((prev) => [...prev, { role: "user", content: message }, { role: "assistant", content: "" }]);
     let assistantText = "";
     // When a tool interrupts the assistant's prose, the next text delta must
@@ -135,7 +142,12 @@ export function useAgent() {
         credentials: "include",
         body: JSON.stringify({ message, aiConfig }),
       });
-      if (!chatRes.ok) { updateAssistant(`Error: ${await chatRes.text()}`); return; }
+      if (!chatRes.ok) {
+        const detail = (await chatRes.text().catch(() => "")) || `Request failed (${chatRes.status})`;
+        updateAssistant(`Error: ${detail}`);
+        setError(detail);
+        return;
+      }
 
       const reader = chatRes.body!.getReader();
       const decoder = new TextDecoder();
@@ -192,6 +204,7 @@ export function useAgent() {
                     ? { ...ds, steps: ds.steps ?? prev.steps, failedPhase: prev.phase }
                     : ds,
                 );
+                if (ds.phase === "error") setError(ds.error || "Deploy failed");
                 if (ds.phase === "live" && ds.appUrl && sessionId) {
                   const host = ds.appUrl.replace("https://", "").split("/")[0].split(".")[0];
                   projectsMgr.markDeployed(sessionId, host, ds.appUrl);
@@ -200,6 +213,7 @@ export function useAgent() {
               }
               case "error":
                 appendAssistant(`\nError: ${evt.data}`);
+                setError(String(evt.data));
                 break;
             }
           } catch { /* skip a single malformed event, keep the stream alive */ }
@@ -210,8 +224,10 @@ export function useAgent() {
       const errMsg = (err as Error).message || String(err);
       if (errMsg.includes("reset") || errMsg.includes("network") || errMsg.includes("Failed to fetch")) {
         updateAssistant(`${assistantText}\n\nConnection interrupted. Say "continue" or "deploy" to resume.`);
+        setError(`Connection interrupted: ${errMsg}. Say "continue" or "deploy" to resume.`);
       } else {
         updateAssistant(`Connection error: ${errMsg}`);
+        setError(`Connection error: ${errMsg}`);
       }
     } finally {
       setIsStreaming(false);
@@ -219,16 +235,20 @@ export function useAgent() {
       // was still provisioning/pushing/building — with no terminal live/error
       // deploy_status — don't leave the spinner stuck forever. Resolve it to a
       // recoverable error state. Terminal phases (live/error) are left as-is.
-      setDeployState((prev) =>
-        prev && prev.phase !== "live" && prev.phase !== "error"
-          ? { ...prev, phase: "error", failedPhase: prev.phase, error: "Deploy status unknown — the connection ended before the deploy finished. Reload to check whether it completed." }
-          : prev,
-      );
+      setDeployState((prev) => {
+        if (prev && prev.phase !== "live" && prev.phase !== "error") {
+          setError("Deploy status unknown — the connection ended before the deploy finished. Reload to check whether it completed.");
+          return { ...prev, phase: "error", failedPhase: prev.phase, error: "Deploy status unknown — the connection ended before the deploy finished. Reload to check whether it completed." };
+        }
+        return prev;
+      });
     }
   }, [sessionId, isStreaming, projectsMgr]);
 
+  const dismissError = useCallback(() => setError(null), []);
+
   return {
-    messages, isStreaming, tokensIn, tokensOut, deployState,
+    messages, isStreaming, tokensIn, tokensOut, deployState, error, dismissError,
     projects: projectsMgr.projects, currentProjectId: projectsMgr.currentId,
     projectsError: projectsMgr.loadError, reloadProjects: projectsMgr.reload,
     sendMessage, createProject, switchProject, loadHistory,
