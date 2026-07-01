@@ -11,41 +11,53 @@ export interface Project {
   deployed: boolean;
 }
 
+// The agent worker owns BOTH the session index (its D1) and the transcripts
+// (its Durable Objects). The console reads/writes that single source of truth —
+// the same origin it already uses for chat + /history — rather than a separate
+// publisher store, which forks the project list away from where the real
+// sessions live (and leaves the picker empty while transcripts sit orphaned).
+const AGENT_URL = "https://agent.freegamestore.online";
+
 interface ServerSession {
   id: string;
   name: string;
-  appId?: string;
-  appUrl?: string;
+  gameId?: string;
+  gameUrl?: string;
   deployed: boolean;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string; // D1 datetime text, e.g. "2026-06-29 21:26:52"
 }
 
 const CURRENT_KEY = "fgs_current_project";
 
 async function fetchSessions(signal: AbortSignal): Promise<Project[]> {
-  const res = await fetch("/api/agent/sessions?limit=100", { signal });
+  const res = await fetch(`${AGENT_URL}/sessions`, { signal, credentials: "include" });
   if (!res.ok) throw new Error(`fetch sessions failed: ${res.status}`);
   const data = (await res.json()) as { sessions: ServerSession[] };
-  return data.sessions.map((session) => ({
-    id: session.id,
-    name: session.name,
-    appId: session.appId,
-    appUrl: session.appUrl,
-    deployed: session.deployed,
-    createdAt: new Date(session.createdAt).toISOString(),
-    updatedAt: session.updatedAt ?? session.createdAt,
-  }));
+  return data.sessions.map((session) => {
+    const ms = Date.parse(session.createdAt);
+    return {
+      id: session.id,
+      name: session.name,
+      appId: session.gameId,
+      appUrl: session.gameUrl,
+      deployed: session.deployed,
+      createdAt: Number.isNaN(ms) ? new Date().toISOString() : new Date(ms).toISOString(),
+      updatedAt: Number.isNaN(ms) ? Date.now() : ms,
+    };
+  });
 }
 
 function putSession(project: Project): void {
-  fetch(`/api/agent/sessions/${project.id}`, {
+  // Session content (messages/files) is persisted by the DO during chat; this
+  // only upserts the lightweight index row (title + deployed game).
+  fetch(`${AGENT_URL}/sessions/${project.id}`, {
     method: "PUT",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      name: project.name,
-      appId: project.appId,
-      appUrl: project.appUrl,
+      title: project.name,
+      gameId: project.appId,
+      gameUrl: project.appUrl,
       deployed: project.deployed,
     }),
   }).catch(() => {

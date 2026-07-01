@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useProjects, type Project } from "./useProjects";
 
 export type { Project };
@@ -33,52 +33,15 @@ export function useAgent() {
   const [tokensIn, setTokensIn] = useState(0);
   const [tokensOut, setTokensOut] = useState(0);
   const [deployState, setDeployState] = useState<DeployState | null>(null);
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
   const isStreamingRef = useRef(isStreaming);
   isStreamingRef.current = isStreaming;
-  const skipNextSyncRef = useRef(false);
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
-  useEffect(() => {
-    if (skipNextSyncRef.current) {
-      skipNextSyncRef.current = false;
-      return;
-    }
-    if (isStreaming || messages.length <= 1 || !sessionId) return;
-    const timer = window.setTimeout(() => {
-      fetch(`/api/agent/sessions/${sessionId}/messages`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages.slice(-300) }),
-      }).catch(() => {});
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [sessionId, messages, isStreaming]);
-
-  useEffect(() => {
-    const flush = () => {
-      const sid = sessionIdRef.current;
-      const current = messagesRef.current;
-      if (!sid || current.length <= 1 || isStreamingRef.current) return;
-      fetch(`/api/agent/sessions/${sid}/messages`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: current.slice(-300) }),
-        keepalive: true,
-      }).catch(() => {});
-    };
-    const onHide = () => {
-      if (document.visibilityState === "hidden") flush();
-    };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", onHide);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      document.removeEventListener("visibilitychange", onHide);
-    };
-  }, []);
+  // No client-side message persistence: the agent worker's Durable Object saves
+  // the authoritative transcript on every turn, and loadHistory() restores it
+  // from /session/:id/history. Mirroring messages into a separate publisher
+  // store only forked the transcript and raced the DO.
 
   const resetUI = useCallback(() => {
     setMessages(DEFAULT_MESSAGES);
@@ -107,16 +70,14 @@ export function useAgent() {
     if (isStreamingRef.current) return;
     try {
       const historyRes = await fetch(`${AGENT_URL}/session/${sessionId}/history`, { credentials: "include" });
-      // Bail if the user switched projects while this was in flight — otherwise
-      // the old session's history overwrites the new one's, and the debounced
-      // sync then PUTs it back, corrupting the new session's stored transcript.
+      // Bail if the user switched projects while this was in flight, so the old
+      // session's history can't overwrite the newly-selected one.
       if (sessionIdRef.current !== sessionId) return;
       if (historyRes.ok) {
         const historyData = await historyRes.json();
         if (sessionIdRef.current !== sessionId) return;
         const restored = restoreMessages(historyData.messages || []);
         if (restored.length > 0) {
-          skipNextSyncRef.current = true;
           setMessages(restored);
           setDeployState(historyData.deployStatus ?? null);
           if (historyData.deployStatus?.phase === "live" && historyData.appId) {
@@ -124,24 +85,6 @@ export function useAgent() {
           } else if (historyData.appName) {
             projectsMgr.rename(sessionId, historyData.appName);
           }
-          return;
-        }
-      }
-
-      const d1Res = await fetch(`/api/agent/sessions/${sessionId}`);
-      if (sessionIdRef.current !== sessionId) return;
-      if (d1Res.ok) {
-        const data = (await d1Res.json()) as { session?: { messages?: AgentMessage[]; deployState?: DeployState | null; appId?: string; appUrl?: string; name?: string } | null };
-        if (sessionIdRef.current !== sessionId) return;
-        if (data.session?.messages?.length) {
-          skipNextSyncRef.current = true;
-          setMessages(data.session.messages);
-        }
-        setDeployState(data.session?.deployState ?? null);
-        if (data.session?.deployState?.phase === "live" && data.session.appId) {
-          projectsMgr.markDeployed(sessionId, data.session.appId, data.session.deployState.appUrl || data.session.appUrl || "");
-        } else if (data.session?.name) {
-          projectsMgr.rename(sessionId, data.session.name);
         }
       }
     } catch {
