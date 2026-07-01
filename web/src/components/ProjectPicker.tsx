@@ -24,12 +24,32 @@ interface CreatorGame {
   createdAt?: string;
 }
 
+type StatusFilter = "all" | "published" | "draft";
+const STATUS_FILTERS: StatusFilter[] = ["all", "published", "draft"];
+
+/** Small Live/Draft badge, matching the dashboard's game-status pill. */
+function StatusPill({ published }: { published: boolean }) {
+  return (
+    <span
+      className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0"
+      style={{
+        background: published ? "var(--accent-soft, #1a2e26)" : "transparent",
+        color: published ? "var(--accent)" : "var(--muted)",
+        border: published ? "none" : "1px solid var(--line)",
+      }}
+    >
+      {published ? "Live" : "Draft"}
+    </span>
+  );
+}
+
 export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose }: ProjectPickerProps) {
   const [orgRepos, setOrgRepos] = useState<OrgRepo[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "new">("all");
+  const [status, setStatus] = useState<StatusFilter>("all");
 
   useEffect(() => {
     // The signed-in creator's games, from the same registry-backed, ownership-
@@ -58,11 +78,23 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
       .finally(() => setLoading(false));
   }, []);
 
-  // Merge + filter by search
+  // Merge + filter by search and status. A VibeCode project is "published" once
+  // deployed, otherwise a "draft"; registry games are always published/live, so
+  // the draft filter hides them entirely.
   const q = search.toLowerCase();
   const localIds = new Set(projects.map((p) => p.appId).filter(Boolean));
-  const filteredLocal = projects.filter((p) => !q || p.name.toLowerCase().includes(q) || p.appId?.toLowerCase().includes(q));
-  const orgOnly = orgRepos.filter((r) => !localIds.has(r.id) && (!q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q)));
+  const matchesQ = (name: string, extra?: string) =>
+    !q || name.toLowerCase().includes(q) || (extra ?? "").toLowerCase().includes(q);
+  const filteredLocal = projects.filter((p) => {
+    if (status === "published" && !p.deployed) return false;
+    if (status === "draft" && p.deployed) return false;
+    return matchesQ(p.name, p.appId);
+  });
+  const orgOnly =
+    status === "draft"
+      ? []
+      : orgRepos.filter((r) => !localIds.has(r.id) && matchesQ(r.name, r.description));
+  const nothingToShow = !loading && filteredLocal.length === 0 && orgOnly.length === 0;
 
   function handleSelectOrg(repo: OrgRepo) {
     // Create a new VibeCode session for this org repo
@@ -108,7 +140,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
           </button>
         </div>
 
-        {/* Search */}
+        {/* Search + status filter */}
         {tab === "all" && (
           <div className="px-3 pt-3 shrink-0">
             <input
@@ -119,6 +151,24 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
               className="w-full p-2 rounded-lg border text-sm"
               style={{ background: "var(--paper)", borderColor: "var(--line)", color: "var(--ink)" }}
             />
+            <div className="flex gap-1.5 mt-2" role="group" aria-label="Filter by status">
+              {STATUS_FILTERS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  aria-pressed={status === s}
+                  className="px-2.5 py-1 rounded-full text-xs font-semibold"
+                  style={{
+                    cursor: "pointer",
+                    border: "1px solid var(--line)",
+                    background: status === s ? "var(--accent)" : "transparent",
+                    color: status === s ? "#000" : "var(--muted)",
+                  }}
+                >
+                  {s === "all" ? "All" : s === "published" ? "Published" : "Draft"}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -137,6 +187,7 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
                         <div className="text-sm font-semibold truncate">{p.name}</div>
                         {p.appId && <div className="text-xs truncate" style={{ color: "var(--muted)" }}>{p.appId}</div>}
                       </div>
+                      <StatusPill published={p.deployed} />
                       {p.id === currentId && <span className="text-xs" style={{ color: "var(--accent)" }}>current</span>}
                     </button>
                   ))}
@@ -156,11 +207,17 @@ export function ProjectPicker({ projects, currentId, onSelect, onCreate, onClose
                         <div className="text-sm font-semibold truncate">{r.name}</div>
                         <div className="text-xs truncate" style={{ color: "var(--muted)" }}>{r.description || r.id}</div>
                       </div>
-                      <span className="text-xs" style={{ color: "var(--muted)" }}>open</span>
+                      <StatusPill published />
                     </button>
                   ))}
                 </div>
               ) : null}
+
+              {nothingToShow && (
+                <div className="text-center py-6 text-sm" style={{ color: "var(--muted)" }}>
+                  No {status === "all" ? "" : `${status} `}games{search ? " match your search" : " yet"}.
+                </div>
+              )}
             </>
           ) : (
             /* New project */
