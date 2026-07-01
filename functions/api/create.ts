@@ -1,8 +1,6 @@
 import { resolveCreator, corsHeaders } from "./_auth";
 
 interface Env {
-  CF_ACCOUNT_ID: string;
-  CF_API_TOKEN: string;
   GITHUB_TOKEN: string;
   MAX_APPS_PER_USER: string;
   CREATORS: KVNamespace;
@@ -15,14 +13,13 @@ export const onRequestOptions: PagesFunction<Env> = async (ctx) =>
 
 const CONFIG = {
   org: "freegamestore-online",
-  domain: "freegamestore.online",
-};
-
-const TEMPLATES: Record<string, string> = {
-  canvas: "template-game-canvas",
-  grid: "template-game-grid",
-  cards: "template-game-cards",
-  "3d": "template-game-3d",
+  // The canonical provision endpoint. ONE code path creates every game (repo +
+  // R2 host route + registry entry + collaborator), idempotently, on Path B.
+  // The Dashboard used to hand-roll a per-app CF Pages project here — that was
+  // Path A (100-project cap), never wrote a registry entry (so drafts vanished
+  // from the dashboard), and duplicated the GitHub/CF tokens. All of that now
+  // lives in admin's handlePublish; this endpoint just authorizes + forwards.
+  adminProvision: "https://admin.freegamestore.online/api/provision",
 };
 
 // Reserved / infrastructure repos that must never be targetable via /api/create.
@@ -64,10 +61,11 @@ async function countUserGames(org: string, user: string, token: string): Promise
 }
 
 /**
- * POST /api/create — creates repo + CF Pages project (preview only).
- * Does NOT add custom domain, DNS, or registry entry.
- * The game is available at free<id>app.pages.dev for preview.
- * Use POST /api/publish to make it live on the store.
+ * POST /api/create — provision a new game via the canonical admin path (Path B).
+ * Creates the repo from the chosen template, writes the R2 host route + store
+ * registry entry, and grants the creator push access — all idempotently. The
+ * game is live at <id>.freegamestore.online and appears on the dashboard
+ * immediately (registry entry). No CF Pages project is created.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const user = await resolveCreator(context.request, context.env);
@@ -88,71 +86,39 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (idErr) return json({ error: idErr }, 400);
   if (!body.name) return json({ error: "name required" }, 400);
 
-  const id = body.id;
-  const name = body.name;
-  const description = body.description || name;
-  const template = body.template || "canvas";
-  const templateRepo = TEMPLATES[template] || TEMPLATES["canvas"]!;
-  const cfProject = `free${id}app`;
-  const steps: { name: string; status: string; detail: string }[] = [];
-
-  // 1. Create GitHub repo from template (or attach to one the caller already owns)
-  const repoCheck = await fetch(`https://api.github.com/repos/${CONFIG.org}/${id}`, { headers: gh(context.env.GITHUB_TOKEN) });
+  // Per-creator game limit — only when this would be a NEW repo (skip the scan
+  // if the repo already exists; admin's provision is idempotent for re-runs).
+  const repoCheck = await fetch(`https://api.github.com/repos/${CONFIG.org}/${body.id}`, { headers: gh(context.env.GITHUB_TOKEN) });
   const repoExisted = !!((await repoCheck.json()) as Record<string, unknown>).id;
-
-  if (repoExisted) {
-    // SEC: never grant access to an already-existing repo unless the caller is
-    // already a collaborator. Otherwise any signed-in user could attach to another
-    // creator's game (or an infra repo) and push auto-deploying code.
-    if (!(await isCollaborator(CONFIG.org, id, user, context.env.GITHUB_TOKEN))) {
-      return json({ error: "A game with this id already exists" }, 409);
-    }
-    steps.push({ name: "GitHub repo", status: "skip", detail: "Already exists" });
-  } else {
-    // SEC: enforce the per-creator game limit, but only when creating a new repo.
+  if (repoExisted && !(await isCollaborator(CONFIG.org, body.id, user, context.env.GITHUB_TOKEN))) {
+    return json({ error: "A game with this id already exists" }, 409);
+  }
+  if (!repoExisted) {
     const max = parseInt(context.env.MAX_APPS_PER_USER || "5", 10);
     if (await countUserGames(CONFIG.org, user, context.env.GITHUB_TOKEN) >= max) {
       return json({ error: `Game limit reached (${max} per creator)` }, 403);
     }
-    const createRes = await fetch(`https://api.github.com/repos/${CONFIG.org}/${templateRepo}/generate`, {
-      method: "POST",
-      headers: { ...gh(context.env.GITHUB_TOKEN), "X-GitHub-Api-Version": "2022-11-28" },
-      body: JSON.stringify({ owner: CONFIG.org, name: id, private: false, description }),
-    });
-    const createData = await createRes.json() as Record<string, unknown>;
-    steps.push({ name: "GitHub repo", status: createData.id ? "ok" : "fail", detail: createData.id ? `${CONFIG.org}/${id}` : ((createData.message as string) || "Failed") });
-    if (!createData.id) return json({ steps, success: false }, 400);
   }
 
-  // 2. CF Pages project (for preview — no custom domain yet)
-  const projRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/pages/projects`, {
+  // Forward to the canonical provision endpoint. Admin authenticates the caller
+  // from the fgs_token cookie (Domain=.freegamestore.online — shared with this
+  // Pages host), so we pass the incoming Cookie through and pin creatorGithub to
+  // the resolved user so the registry records the right owner.
+  const cookie = context.request.headers.get("Cookie") ?? "";
+  const provRes = await fetch(CONFIG.adminProvision, {
     method: "POST",
-    headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Cookie": cookie },
     body: JSON.stringify({
-      name: cfProject,
-      source: { type: "github", config: { owner: CONFIG.org, repo_name: id, production_branch: "main", deployments_enabled: true, production_deployments_enabled: true } },
-      build_config: { build_command: "npx pnpm@10 install && npx pnpm@10 build", destination_dir: "web/dist" },
-      deployment_configs: { production: { env_vars: { NODE_VERSION: { value: "22" } } } },
+      id: body.id,
+      name: body.name,
+      category: body.category,
+      icon: body.icon,
+      iconBg: body.iconBg,
+      description: body.description,
+      template: body.template,
+      creatorGithub: user,
     }),
   });
-  const projData = await projRes.json() as { success: boolean; errors?: { message: string }[] };
-  steps.push({ name: "CF Pages", status: projData.success ? "ok" : "skip", detail: projData.success ? cfProject : (projData.errors?.[0]?.message || "Exists") });
-
-  // 3. Give creator push access
-  await fetch(`https://api.github.com/repos/${CONFIG.org}/${id}/collaborators/${user}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${context.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "freegamestore-publisher" },
-    body: JSON.stringify({ permission: "push" }),
-  });
-  steps.push({ name: "Access", status: "ok", detail: `@${user} has push access` });
-
-  // 4. Add to creators team
-  await fetch(`https://api.github.com/orgs/${CONFIG.org}/teams/creators/memberships/${user}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${context.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "freegamestore-publisher" },
-    body: JSON.stringify({ role: "member" }),
-  });
-
-  const previewUrl = `https://${cfProject}.pages.dev`;
-  return json({ steps, success: true, previewUrl, repoUrl: `https://github.com/${CONFIG.org}/${id}` });
+  const provData = await provRes.json().catch(() => ({ error: "Provision returned a non-JSON response" }));
+  return json(provData, provRes.status);
 };
